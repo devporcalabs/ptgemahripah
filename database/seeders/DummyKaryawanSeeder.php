@@ -125,7 +125,21 @@ class DummyKaryawanSeeder extends Seeder
             return;
         }
 
-        $faker = fake('id_ID');
+        $faker = null;
+        if (function_exists('fake')) {
+            try {
+                $faker = fake('id_ID');
+            } catch (\Throwable) {
+                $faker = null;
+            }
+        } elseif (class_exists(\Faker\Factory::class)) {
+            try {
+                $faker = \Faker\Factory::create('id_ID');
+            } catch (\Throwable) {
+                $faker = null;
+            }
+        }
+
         $now = now()->startOfDay();
         $karyawanColumns = array_flip(Schema::getColumnListing('karyawan'));
         $komponenColumns = Schema::hasTable('komponen_gaji_karyawan')
@@ -139,8 +153,8 @@ class DummyKaryawanSeeder extends Seeder
             : [];
 
         for ($index = 1; $index <= self::TOTAL; $index++) {
-            $fullName = $faker->unique()->name();
             $gender = self::GENDER_OPTIONS[($index - 1) % count(self::GENDER_OPTIONS)];
+            $fullName = $faker ? $faker->unique()->name() : $this->fallbackName($index, $gender);
             $statusNikah = self::MARITAL_STATUS_OPTIONS[($index - 1) % count(self::MARITAL_STATUS_OPTIONS)];
             $jabatan = $jabatanOptions[($index - 1) % count($jabatanOptions)];
             $departemen = $departemenOptions[($index - 1) % count($departemenOptions)];
@@ -148,7 +162,9 @@ class DummyKaryawanSeeder extends Seeder
             $payrollType = $workType === 'fleksibel' ? 'harian' : (($index % 4 === 0) ? 'harian' : 'bulanan');
             $monthlyBase = $this->resolveBaseSalary($jabatan['name'], $index);
             $dailyRate = (int) round($monthlyBase / 26 / 1000) * 1000;
-            $birthDate = Carbon::instance($faker->dateTimeBetween('-45 years', '-22 years'))->startOfDay();
+            $birthDate = $faker
+                ? Carbon::instance($faker->dateTimeBetween('-45 years', '-22 years'))->startOfDay()
+                : $now->copy()->subYears(22 + ($index % 23))->subDays(($index * 19) % 360)->startOfDay();
             $joinStart = $birthDate->copy()->addYears(18);
             $joinEnd = $workType === 'fleksibel' && $payrollType === 'harian'
                 ? $now->copy()->subMonths(1)
@@ -158,7 +174,9 @@ class DummyKaryawanSeeder extends Seeder
                 $joinStart = $joinEnd->copy()->subYears(1);
             }
 
-            $joinDate = Carbon::instance($faker->dateTimeBetween($joinStart, $joinEnd))->startOfDay();
+            $joinDate = $faker
+                ? Carbon::instance($faker->dateTimeBetween($joinStart, $joinEnd))->startOfDay()
+                : $joinStart->copy()->addDays(($index * 31) % max(1, $joinStart->diffInDays($joinEnd)))->startOfDay();
             $status = $index % 10 === 0 ? 'nonaktif' : 'aktif';
             $resignDate = $this->resolveResignDate($status, $joinDate, $now);
             $rotationMode = $workType === 'rolling'
@@ -194,7 +212,7 @@ class DummyKaryawanSeeder extends Seeder
                 'departemen' => $departemen['name'],
                 'jabatan_id' => $jabatan['id'],
                 'departemen_id' => $departemen['id'],
-                'alamat' => $faker->address(),
+                'alamat' => $faker ? $faker->address() : $this->fallbackAddress($index),
                 'rfid_uid' => $rfidUid,
                 'status' => $status,
                 'shift_id' => $shiftId,
@@ -428,5 +446,41 @@ class DummyKaryawanSeeder extends Seeder
     private function filterByColumns(array $payload, array $columnMap): array
     {
         return array_intersect_key($payload, $columnMap);
+    }
+
+    private function fallbackName(int $index, string $gender): string
+    {
+        $firstNamesMale = [
+            'Budi', 'Agus', 'Bambang', 'Dedi', 'Eko', 'Hadi', 'Iwan', 'Joko', 'Rudi', 'Tri',
+            'Wahyu', 'Yanto', 'Ahmad', 'Rizky', 'Fajar', 'Bayu', 'Dimas', 'Aditya', 'Doni', 'Hendra',
+        ];
+
+        $firstNamesFemale = [
+            'Siti', 'Dewi', 'Sri', 'Rina', 'Wati', 'Nur', 'Ani', 'Ratna', 'Yuni', 'Endang',
+            'Putri', 'Intan', 'Lestari', 'Mega', 'Sari', 'Indah', 'Maya', 'Dian', 'Tari', 'Fitri',
+        ];
+
+        $lastNames = [
+            'Santoso', 'Pratama', 'Saputra', 'Kusuma', 'Hidayat', 'Wijaya', 'Setiawan', 'Nugroho',
+            'Wibowo', 'Firmansyah', 'Permana', 'Gunawan', 'Susanto', 'Purnomo', 'Kurniawan',
+            'Utomo', 'Subekti', 'Hartanto', 'Rahardjo', 'Sudrajat',
+        ];
+
+        $firsts = $gender === 'wanita' ? $firstNamesFemale : $firstNamesMale;
+        $first = $firsts[($index - 1) % count($firsts)];
+        $last = $lastNames[(int) floor(($index - 1) / count($firsts)) % count($lastNames)];
+
+        return "{$first} {$last}";
+    }
+
+    private function fallbackAddress(int $index): string
+    {
+        $streets = ['Jl. Industri Raya', 'Jl. Merdeka', 'Jl. Gatot Subroto', 'Jl. Sudirman', 'Jl. Diponegoro', 'Jl. Pahlawan', 'Jl. Soekarno Hatta', 'Jl. Ahmad Yani'];
+        $cities = ['Jakarta Timur', 'Bandung Barat', 'Surabaya', 'Semarang', 'Yogyakarta', 'Surakarta', 'Bekasi', 'Tangerang', 'Depok', 'Bogor'];
+
+        $street = $streets[($index - 1) % count($streets)];
+        $city = $cities[($index - 1) % count($cities)];
+
+        return "{$street} No. {$index}, {$city}";
     }
 }
